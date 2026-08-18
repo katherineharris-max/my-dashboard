@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+        }
+        
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        .refresh-btn:hover {
+            background: #764ba2;
+        }
+        
+        .refresh-btn.loading {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .data-table th {
+            background: #f0f0f0;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .data-table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            color: #555;
+        }
+        
+        .data-table tr:hover {
+            background: #f9f9f9;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #c33;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-box .label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+        
+        .stat-box .value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📊 Dynamic Dashboard</h1>
+                <p id="lastUpdate" style="color: #999; font-size: 14px; margin-top: 5px;">Loading...</p>
+            </div>
+            <button class="refresh-btn" id="refreshBtn" onclick="fetchData()">🔄 Refresh Data</button>
+        </div>
+        
+        <div id="error"></div>
+        <div id="loading" class="loading">Loading your data...</div>
+        <div id="content" style="display: none;">
+            <div id="stats" class="stats"></div>
+            <div class="dashboard">
+                <div class="card">
+                    <h2>Chart</h2>
+                    <canvas id="chart1"></canvas>
+                </div>
+                <div class="card">
+                    <h2>Data Table</h2>
+                    <div id="dataTable"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ⬇️ CONFIGURE THESE 3 THINGS ⬇️
+        const SHEET_ID = 'YOUR_SHEET_ID_HERE'; // Replace with your Google Sheet ID
+        const SHEET_RANGE = 'Sheet1!A:D'; // Adjust to your data range
+        const API_KEY = 'YOUR_API_KEY_HERE'; // Get this in Step 3
+        
+        let chartInstance = null;
+
+        async function fetchData() {
+            const btn = document.getElementById('refreshBtn');
+            const loading = document.getElementById('loading');
+            const content = document.getElementById('content');
+            const error = document.getElementById('error');
+            
+            btn.disabled = true;
+            btn.classList.add('loading');
+            loading.style.display = 'block';
+            content.style.display = 'none';
+            error.innerHTML = '';
+            
+            try {
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_RANGE}?key=${API_KEY}`;
+                const response = await fetch(url);
+                
+                if (!response.ok) throw new Error('Failed to fetch data. Check your Sheet ID and API Key.');
+                
+                const data = await response.json();
+                const rows = data.values || [];
+                
+                if (rows.length === 0) throw new Error('No data found in your sheet.');
+                
+                // Parse headers and data
+                const headers = rows[0];
+                const dataRows = rows.slice(1);
+                
+                // Display stats
+                displayStats(headers, dataRows);
+                
+                // Display chart (using first numeric column)
+                displayChart(headers, dataRows);
+                
+                // Display table
+                displayTable(headers, dataRows);
+                
+                // Update timestamp
+                document.getElementById('lastUpdate').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+                
+                loading.style.display = 'none';
+                content.style.display = 'block';
+                
+            } catch (err) {
+                error.innerHTML = `<div class="error">❌ Error: ${err.message}</div>`;
+                loading.style.display = 'none';
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('loading');
+            }
+        }
+
+        function displayStats(headers, dataRows) {
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = '';
+            
+            // Show basic stats
+            const stats = [
+                { label: 'Total Records', value: dataRows.length },
+                { label: 'Last Updated', value: new Date().toLocaleDateString() }
+            ];
+            
+            stats.forEach(stat => {
+                const box = document.createElement('div');
+                box.className = 'stat-box';
+                box.innerHTML = `<div class="label">${stat.label}</div><div class="value">${stat.value}</div>`;
+                statsDiv.appendChild(box);
+            });
+        }
+
+        function displayChart(headers, dataRows) {
+            // Simple chart: count of items (bar chart)
+            const ctx = document.getElementById('chart1');
+            
+            // Create labels and data from first two columns
+            const labels = dataRows.map(row => row[0] || '').slice(0, 10);
+            const values = dataRows.map(row => parseInt(row[1]) || 0).slice(0, 10);
+            
+            if (chartInstance) chartInstance.destroy();
+            
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: headers[1] || 'Value',
+                        data: values,
+                        backgroundColor: '#667eea',
+                        borderColor: '#764ba2',
+                        borderWidth: 2,
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: true }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        function displayTable(headers, dataRows) {
+            const tableDiv = document.getElementById('dataTable');
+            
+            let html = '<table class="data-table"><thead><tr>';
+            headers.forEach(h => html += `<th>${h}</th>`);
+            html += '</tr></thead><tbody>';
+            
+            dataRows.slice(0, 10).forEach(row => {
+                html += '<tr>';
+                headers.forEach((_, i) => html += `<td>${row[i] || '-'}</td>`);
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            tableDiv.innerHTML = html;
+        }
+
+        // Load data on page load
+        fetchData();
+    </script>
+</body>
+</html>
